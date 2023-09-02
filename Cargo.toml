@@ -1,0 +1,13 @@
+[package]
+name = "lib_multihead"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+csv = "1.2.2"
+dfdx = { version = "0.13.0", features = ["safetensors", "numpy"] }
+ndarray = "0.15.6"
+ndarray-csv = "0.5.2"
+tokenizers = "0.13.3"
