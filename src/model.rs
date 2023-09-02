@@ -12,8 +12,7 @@ use dfdx::optim::Adam;
 use dfdx::optim::Optimizer;
 
 use dfdx::prelude::SaveToSafetensors;
-use dfdx::prelude::*;
-use dfdx::nn::{SaveToNpz, LoadFromNpz};
+use dfdx::nn::SaveToNpz;
 
 pub const EPOCHS: usize = 50;
 pub const SENTENCE_SIZE: usize = 19;
@@ -92,7 +91,7 @@ pub fn train_sentiment_model(
     // Save model
     // https://github.com/coreylowman/dfdx/blob/main/examples/safetensors-save-load.rs
     model.save_safetensors("model.safetensors").expect("Failed to save model");
-    model.save("mymodel.npz");
+    let _ = model.save("mymodel.npz");
   }
 
   let end: std::time::Instant = std::time::Instant::now();

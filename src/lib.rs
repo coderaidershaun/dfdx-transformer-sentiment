@@ -17,7 +17,7 @@ mod tests {
         let filepath: String = format!("{}/data/chats.csv", curr_dir);
         let preprocessor: DataPreprocessor = DataPreprocessor::new(&filepath);
 
-        let (x_train, y_train, x_test, y_test, vocab_size) 
+        let (x_train, y_train, _, _, vocab_size) 
             = preprocessor.preprocess_train_test_split_data().unwrap();
 
         assert_eq!(VOCAB_SIZE, vocab_size as usize);
