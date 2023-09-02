@@ -2,18 +2,23 @@ use csv::Reader;
 use ndarray::Array2;
 use ndarray_csv::Array2Reader;
 use tokenizers::tokenizer::Tokenizer;
+use bincode::{serialize, deserialize_from};
 
 use std::error::Error;
 use std::fs::File;
+use std::io::Write;
 use std::collections::HashMap;
 
+use super::model::SENTENCE_SIZE;
+
 pub struct DataPreprocessor {
-  pub filepath: String
+  pub filepath_csv: String,
+  pub filepath_hashmap: String
 }
 
 impl DataPreprocessor {
-  pub fn new(filepath: &str) -> Self {
-    Self { filepath: filepath.to_string() }
+  pub fn new(filepath_csv: &str, filepath_hashmap: &str) -> Self {
+    Self { filepath_csv: filepath_csv.to_string(), filepath_hashmap: filepath_hashmap.to_string() }
   }
 
   /// Encodes labels into increments for data preprocessing
@@ -29,9 +34,9 @@ impl DataPreprocessor {
   }
 
   /// Converts string sentence into token array
-  fn generate_tokens_with_padding(&self, arr: &Vec<String>) -> tokenizers::tokenizer::Result<Vec<Vec<u32>>> {
+  fn generate_tokens_with_padding(&self, arr: &Vec<String>, max_len: Option<usize>) -> tokenizers::tokenizer::Result<Vec<Vec<u32>>> {
     let tokenizer: Tokenizer = Tokenizer::from_pretrained("bert-base-cased", None)?;
-    let mut max_len: usize = 0;
+    let mut max_len: usize = max_len.unwrap_or(0);
     let mut tokens: Vec<Vec<u32>> = vec!();
     for s in arr {
       let t: tokenizers::Encoding = tokenizer.encode(s.clone(), false).unwrap();
@@ -53,15 +58,15 @@ impl DataPreprocessor {
 
   /// Loads and encode data as x for tokens and y for label encoded
   fn load_and_encode_data(&self) -> Result<(Vec<Vec<u32>>, Vec<u32>), Box<dyn Error>> {
-    let file: File = File::open(&self.filepath)?;
+    let file: File = File::open(&self.filepath_csv)?;
     let mut reader: Reader<File> = Reader::from_reader(file);
     let data: Array2<String> = reader.deserialize_array2((91, 2))?;
   
     let x_strings: Vec<String> = data.column(0).to_vec();
     let y_strings: Vec<String> = data.column(1).to_vec();
 
-    let x: Vec<Vec<u32>> = self.generate_tokens_with_padding(&x_strings).map_err(|e| e.to_string())?;
-    let y: Vec<Vec<u32>> = self.generate_tokens_with_padding(&y_strings).map_err(|e| e.to_string())?;
+    let x: Vec<Vec<u32>> = self.generate_tokens_with_padding(&x_strings, None).map_err(|e| e.to_string())?;
+    let y: Vec<Vec<u32>> = self.generate_tokens_with_padding(&y_strings, None).map_err(|e| e.to_string())?;
     let y: Vec<u32> = self.encode_Labels(y);
 
     Ok((x, y))
@@ -71,7 +76,7 @@ impl DataPreprocessor {
   /// Note: You could save this for looking back up later if you wanted to
   fn x_to_unique_tokens(&self, x_arr: Vec<Vec<u32>>) -> (Vec<Vec<u32>>, u32) {
     let mut x_new: Vec<Vec<u32>> = vec!();
-    let mut value = 0;
+    let mut value: u32 = 0;
 
     let mut x_hash: HashMap<u32, u32> = HashMap::new();
     x_hash.insert(0, value);
@@ -94,6 +99,11 @@ impl DataPreprocessor {
       }
       x_new.push(ids_new);
     }
+
+    // Save hashmap to binary format for referencing during usage
+    let encoded: Vec<u8> = serialize(&x_hash).unwrap();
+    let mut file: File = File::create(&self.filepath_hashmap).unwrap();
+    file.write_all(&encoded).unwrap();
 
     vocab_size += 1;
     (x_new, vocab_size)
@@ -137,5 +147,19 @@ impl DataPreprocessor {
     assert_eq!(y_train.len() + y_test.len(), data_len);
 
     Ok((x_train, y_train, x_test, y_test, vocab_size))
+  }
+  
+  /// Tokenizes a sentence to match training data
+  pub fn post_tokenize_sentence(&self, sentence: &str) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+    let mut file: File = File::open(&self.filepath_hashmap)?;
+    let token_table: HashMap<u32, u32> = deserialize_from(&mut file).unwrap();
+
+    let sentence_arr: Vec<String> = vec!(sentence.to_string());
+    let token_arr: Vec<Vec<u32>> = self.generate_tokens_with_padding(&sentence_arr, Some(SENTENCE_SIZE))
+      .map_err(|e| e.to_string())?;
+    
+    let mut tokens: Vec<u32> = token_arr[0].clone();
+    tokens.iter_mut().for_each(|t| *t = *token_table.get(t).unwrap_or(&0));
+    Ok(tokens)
   }
 }

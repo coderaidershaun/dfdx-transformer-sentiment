@@ -11,7 +11,7 @@ use dfdx::tensor_ops::Backward;
 use dfdx::optim::Adam;
 use dfdx::optim::Optimizer;
 
-use dfdx::prelude::SaveToSafetensors;
+use dfdx::prelude::{SaveToSafetensors, LoadFromNpz, Module};
 use dfdx::nn::SaveToNpz;
 
 pub const EPOCHS: usize = 50;
@@ -70,10 +70,10 @@ pub fn train_sentiment_model(
       // let a = mlp.forward(x.clone());
       // let b = mlp.2.forward(mlp.1.forward(mlp.0.forward(x)));
       // assert_eq!(a.array(), b.array());
-      let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), f32, dfdx::tensor::Cpu, dfdx::tensor::OwnedTape<f32, dfdx::tensor::Cpu>> = model.0.forward_mut(x.leaky_trace());
-      let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), f32, dfdx::tensor::Cpu, dfdx::tensor::OwnedTape<f32, dfdx::tensor::Cpu>> = model.1.forward_mut(x);
-      let x: Tensor<(Const<SENTENCE_SIZE>,), f32, dfdx::tensor::Cpu, dfdx::tensor::OwnedTape<f32, dfdx::tensor::Cpu>> = x.mean(); // GlobalPoolLayer as library does not have one
-      let logits: Tensor<(Const<NUM_CLASSES>,), f32, dfdx::tensor::Cpu, dfdx::tensor::OwnedTape<f32, dfdx::tensor::Cpu>> = model.2.forward_mut(x);
+      let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.0.forward_mut(x.leaky_trace());
+      let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.1.forward_mut(x);
+      let x: Tensor<(Const<SENTENCE_SIZE>,), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = x.mean(); // GlobalPoolLayer as library does not have one
+      let logits: Tensor<(Const<NUM_CLASSES>,), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.2.forward_mut(x);
 
       let loss = binary_cross_entropy_with_logits_loss(logits, target_probs);
       total_epoch_loss += loss.array();
@@ -96,4 +96,36 @@ pub fn train_sentiment_model(
 
   let end: std::time::Instant = std::time::Instant::now();
   dbg!(&start, &end);
+}
+
+/// Get Prediction
+/// Makes a prediction based upon text input
+pub fn get_prediction(x_sentence: Vec<u32>) -> f32 {
+  let dev: dfdx::tensor::Cpu = AutoDevice::default();
+  type Device = dfdx::tensor::Cpu;
+  type DType = f32;
+
+  type SentimentModel = (
+    dfdx::nn::builders::Embedding<VOCAB_SIZE, EMBEDDING_DIM>,
+    dfdx::nn::builders::TransformerEncoder<EMBEDDING_DIM, NUM_HEADS, FF_DIM, NUM_LAYERS>,
+    dfdx::nn::builders::Linear<SENTENCE_SIZE, NUM_CLASSES>
+  );
+
+  let mut model = dev.build_module::<SentimentModel, DType>();
+  model.load("mymodel.npz").unwrap();
+
+  let x_d: Vec<usize> = x_sentence.iter().map(|&d| d as usize).collect();
+  let x_d: &[usize] = x_d.as_slice();
+  let x_d_array: &[usize; SENTENCE_SIZE] = x_d.try_into().expect("wrong length");
+  let x: Tensor<(Const<SENTENCE_SIZE>,), usize, Device> = dev.tensor(x_d_array);
+
+  let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.0.forward(x.leaky_trace());
+  let x: Tensor<(Const<SENTENCE_SIZE>, Const<EMBEDDING_DIM>), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.1.forward(x);
+  let x: Tensor<(Const<SENTENCE_SIZE>,), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = x.mean(); // GlobalPoolLayer as library does not have one
+  let logits: Tensor<(Const<NUM_CLASSES>,), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = model.2.forward(x);
+
+  let y_hat: Tensor<(Const<NUM_CLASSES>,), DType, Device, dfdx::tensor::OwnedTape<DType, Device>> = logits.sigmoid();
+  let y_hat: Vec<f32> = y_hat.as_vec();
+
+  y_hat[0]
 }
